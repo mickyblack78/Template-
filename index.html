@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>X200 DCM3.7 MASTER CORE</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
+        #log { border: 2px solid #444; height: 500px; overflow-y: scroll; padding: 15px; background: #050505; white-space: pre-wrap; font-size: 14px; color: #0f0; }
+        button { background: #0f0; color: #000; padding: 25px; width: 100%; border: none; font-weight: bold; cursor: pointer; font-size: 1.5em; text-transform: uppercase; }
+        button:disabled { background: #222; color: #444; cursor: not-allowed; }
+        .tx { color: #0ff; } .err { color: #f44; font-weight: bold; } .ok { color: #0f0; font-weight: bold; } .info { color: #888; }
+    </style>
+</head>
+<body>
+    <h2>DCM3.7 MASTER INTERFACE</h2>
+    <div id="log">SYSTEM STATUS: READY</div><br>
+    <button id="run">EXECUTE PUMP SEQUENCE</button>
+
+    <script>
+        const logEle = document.getElementById('log');
+        const btn = document.getElementById('run');
+        let port, writer, reader, decoder = new TextDecoder();
+        let isBusy = false, hb; 
+
+        function logger(msg, className = "") {
+            const time = new Date().toLocaleTimeString().split(' ')[0];
+            logEle.innerHTML += `<div class="${className}">[${time}] ${msg}</div>`;
+            logEle.scrollTop = logEle.scrollHeight;
+        }
+
+        async function talk(cmd, retries = 0) {
+            if (!writer || retries > 3) return "";
+            while (isBusy) await new Promise(r => setTimeout(r, 50)); 
+            isBusy = true;
+            try {
+                logger(`TX: ${cmd}`, "tx");
+                await writer.write(new TextEncoder().encode(cmd + '\r'));
+                let res = "", timeoutCounter = 0;
+                
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    if (value) {
+                        res += decoder.decode(value);
+                        // AUDITED FIX: Only break if we have the prompt AND data
+                        if (res.includes('>') && res.length > cmd.length) break;
+                    }
+                    if (++timeoutCounter > 2000) throw new Error("HARDWARE TIMEOUT");
+                }
+
+                // AUDITED CLEANUP: Strip whitespace and command echo
+                let clean = res.toUpperCase().replace(/\s+/g, '');
+                let strippedCmd = cmd.toUpperCase().replace(/\s+/g, '');
+                clean = clean.replace(strippedCmd, "").replace(/>/g, "").trim();
+                
+                let display = clean.match(/.{1,2}/g)?.join(" ") || clean;
+                logger(`RX: ${display}`);
+
+                if (clean.includes("7F2778") || clean.includes("7F3178")) {
+                    logger("ECU BUSY (78) - WAITING...", "info");
+                    isBusy = false; await new Promise(r => setTimeout(r, 2000));
+                    return talk(cmd, retries + 1); 
+                }
+                return clean;
+            } catch (e) { logger(`ERR: ${e.message}`, "err"); throw e; }
+            finally { isBusy = false; }
+        }
+
+        btn.onclick = async () => {
+            try {
+                if (hb) clearInterval(hb);
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 38400 });
+                writer = port.writable.getWriter();
+                reader = port.readable.getReader();
+                btn.disabled = true;
+
+                // 1. ADAPTER INIT
+                await talk("ATZ");     await new Promise(r => setTimeout(r, 200));
+                await talk("ATE0");    await new Promise(r => setTimeout(r, 100));
+                await talk("ATSP6");   await new Promise(r => setTimeout(r, 100));
+                await talk("ATSH7E0"); await new Promise(r => setTimeout(r, 100));
+
+                // 2. SESSION
+                const session = await talk("10 03");
+                if (!session.includes("5003")) throw new Error("ECU Refused Session");
+
+                // 3. HEARTBEAT
+                hb = setInterval(async () => {
+                    if (!isBusy && writer) {
+                        try { await writer.write(new TextEncoder().encode("3E 80\r")); } catch(e) {}
+                    }
+                }, 2000);
+
+                // 4. SECURITY
+                const seed = await talk("27 01");
+                await new Promise(r => setTimeout(r, 200));
+
+                if (seed.includes("6701AA55")) {
+                    logger("SEED AA 55 DETECTED", "ok");
+                    const auth = await talk("27 02 EE 16"); 
+                    if (auth.includes("6702")) {
+                        logger("UNLOCKED", "ok");
+                        const pump = await talk("31 01 FF 01");
+                        if (pump.includes("7101")) logger("--- PUMP ACTIVE ---", "ok");
+                    } else if (auth.includes("7F2737")) {
+                        logger("10-MIN LOCKOUT ACTIVE", "err");
+                    } else { logger(`DENIED: ${auth}`, "err"); }
+                } else {
+                    logger(`SEED MISMATCH: ${seed}`, "err");
+                }
+            } catch (err) { logger(`HALTED: ${err.message}`, "err"); btn.disabled = false; }
+        };
+    </script>
+</body>
+</html>
