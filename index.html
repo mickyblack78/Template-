@@ -143,6 +143,7 @@
             if (!port) { log("ERROR: NO CONNECTION"); return; }
             isHandshaking = true;
             log("Requesting Level 03 Seed...");
+            await new Promise(r => setTimeout(r, 500));
             let res = await send("2703\r");
             if (res.includes("6703")) {
                 lastSeed = res.split("6703")[1];
