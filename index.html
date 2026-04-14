@@ -114,6 +114,8 @@
                         lastSeed = seedRes.split("6701")[1].substring(0,8);
                         log("SEED RECEIVED: " + lastSeed);
                         log("READY FOR KEY CALCULATION");
+                        let key = swapBytes(lastSeed);
+                await send("2702" + key + "\r");
                     } else {
                         log("SEED ERROR: " + seedRes);
                     }
