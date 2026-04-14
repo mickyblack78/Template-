@@ -122,12 +122,8 @@
         } else {
             log("SESSION REJECTED: " + auth);
         }
-    } catch (e) { log("ERROR: " + e.message); }
+    } catch (e) { log("ERROR: " + e.message); 
         
-                    
-        
-            
-
         async function checkFaults() {
             if (!port) return;
             log("CHECKING DTCs...");
