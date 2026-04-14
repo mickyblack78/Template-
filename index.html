@@ -39,7 +39,6 @@
         const disp = document.getElementById('display');
         const log = (m) => { disp.innerHTML += `<div class="stat">> ${m}</div>`; disp.scrollTop = disp.scrollHeight; };
 
-        // --- UTILITY MATH FOR SECURITY ACCESS ---
         const xorMath = (hex, key) => (parseInt(hex, 16) ^ parseInt(key, 16)).toString(16).toUpperCase();
         const swapBytes = (hex) => hex.match(/../g).reverse().join("");
         const reverseHex = (hex) => hex.split("").reverse().join("");
@@ -92,38 +91,38 @@
         }
 
         async function connect() {
-    try {
-        port = await navigator.serial.requestPort();
-        await port.open({ baudRate: 38400 });
-        log("INITIALIZING...");
-        
-        await send("ATZ\r");
-        await send("ATSP6\r");
-        await send("ATSH7E0\r");
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 38400 });
+                log("INITIALIZING...");
+                
+                await send("ATZ\r");
+                await send("ATSP6\r");
+                await send("ATSH7E0\r");
 
-        log("SWITCHING TO EXTENDED SESSION...");
-        let auth = await send("1003\r");
-        
-        if (auth.includes("5003")) {
-            log("SESSION OK. WAITING...");
-            // CRITICAL: Give the ECU 500ms to stabilize in Extended Mode
-            await new Promise(r => setTimeout(r, 500)); 
-            
-            startPinger(); // Start 3E00 to keep the session alive
+                log("SWITCHING TO EXTENDED SESSION...");
+                let auth = await send("1003\r");
+                
+                if (auth.includes("5003")) {
+                    log("SESSION OK. WAITING...");
+                    await new Promise(r => setTimeout(r, 500)); 
+                    
+                    startPinger();
 
-            let seedRes = await send("2701\r");
-            if (seedRes.includes("6701")) {
-                lastSeed = seedRes.split("6701")[1].substring(0,8);
-                log("SEED RECEIVED: " + lastSeed);
-                log("READY FOR KEY CALCULATION");
-            } else {
-                log("SEED ERROR: " + seedRes); // This is where you'll see 7F2712 if session failed
-            }
-        } else {
-            log("SESSION REJECTED: " + auth);
+                    let seedRes = await send("2701\r");
+                    if (seedRes.includes("6701")) {
+                        lastSeed = seedRes.split("6701")[1].substring(0,8);
+                        log("SEED RECEIVED: " + lastSeed);
+                        log("READY FOR KEY CALCULATION");
+                    } else {
+                        log("SEED ERROR: " + seedRes);
+                    }
+                } else {
+                    log("SESSION REJECTED: " + auth);
+                }
+            } catch (e) { log("ERROR: " + e.message); }
         }
-    } catch (e) { log("ERROR: " + e.message); 
-        
+
         async function checkFaults() {
             if (!port) return;
             log("CHECKING DTCs...");
